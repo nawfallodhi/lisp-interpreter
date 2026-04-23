@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include "mpc.h"
 
 static char input[2048];
 
