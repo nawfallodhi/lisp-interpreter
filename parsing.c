@@ -644,6 +644,68 @@ lval* builtin_if(lenv* e, lval* a) {
   return x;
 }
 
+lval* lval_read(mpc_ast_t* t);
+
+lval* builtin_load(lenv* e, lval* a){
+    LASSERT_NUM("load",a,1);
+    LASSERT_TYPE("load",a,0,LVAL_STR);
+
+    mpc_result_t r;
+    if(mpc_parse_contents(a->cell[0]->str,Lispy, &r)){
+        lval* expr =  lval_read(r.output);
+        mpc_ast_delete(r.output);
+
+        while(expr->count){
+            lval* x = lval_eval(e, lval_pop(expr,0));
+            if(x->type == LVAL_ERR){
+                lval_println(x);
+            }
+            lval_del(x);
+        }
+
+        lval_del(expr);
+        lval_del(a);
+
+        return lval_sexpr();
+    } else{
+
+        char* err_msg =mpc_err_string(r.error);
+        mpc_err_delete(r.error);
+
+        lval* err = lval_err("Could not load library %s", err_msg);
+        free(err_msg);
+        lval_del(a);
+
+        return err;
+    }
+}
+
+lval* builtin_print(lenv* e, lval* a) {
+
+  /* Print each argument followed by a space */
+  for (int i = 0; i < a->count; i++) {
+    lval_print(a->cell[i]); putchar(' ');
+  }
+
+  /* Print a newline and delete arguments */
+  putchar('\n');
+  lval_del(a);
+
+  return lval_sexpr();
+}
+
+lval* builtin_error(lenv* e, lval* a) {
+  LASSERT_NUM("error", a, 1);
+  LASSERT_TYPE("error", a, 0, LVAL_STR);
+
+  /* Construct Error from first argument */
+  lval* err = lval_err(a->cell[0]->str);
+
+  /* Delete arguments and return */
+  lval_del(a);
+  return err;
+}
+
 void lenv_add_builtin(lenv* e, char* name, lbuiltin func) {
   lval* k = lval_sym(name);
   lval* v = lval_builtin(func);
@@ -669,7 +731,7 @@ void lenv_add_builtins(lenv* e) {
   lenv_add_builtin(e, "-", builtin_sub);
   lenv_add_builtin(e, "*", builtin_mul);
   lenv_add_builtin(e, "/", builtin_div);
-  
+
   /* Comparison Functions */
   lenv_add_builtin(e, "if",    builtin_if);
   lenv_add_builtin(e, "==",    builtin_eq);
@@ -678,6 +740,11 @@ void lenv_add_builtins(lenv* e) {
   lenv_add_builtin(e, "<",  builtin_lt);
   lenv_add_builtin(e, ">=", builtin_ge);
   lenv_add_builtin(e, "<=", builtin_le);
+
+  /* String Functions */
+  lenv_add_builtin(e, "load",  builtin_load); 
+  lenv_add_builtin(e, "error", builtin_error);
+  lenv_add_builtin(e, "print", builtin_print);
 }
 
 /* Evaluation */
@@ -847,34 +914,45 @@ int main(int argc, char** argv) {
     ",
     Number, Symbol, String, Comment, Sexpr, Qexpr, Expr, Lispy);
   
-  puts("Lispy Version 0.0.0.0.9");
-  puts("Press Ctrl+c to Exit\n");
-  
   lenv* e = lenv_new();
   lenv_add_builtins(e);
   
-  while (1) {
-  
-    char* input = readline("lispy> ");
-    add_history(input);
+  if (argc ==1 ){
+    puts("Lispy Version 0.0.0.0.9");
+    puts("Press Ctrl+c to Exit\n");
+
+    while (1) {
+        char* input = readline("lispy> ");
+        add_history(input);
+        
+        mpc_result_t r;
+        if (mpc_parse("<stdin>", input, Lispy, &r)) {
+        
+            lval* x = lval_eval(e, lval_read(r.output));
+            lval_println(x);
+            lval_del(x);
+        
+            mpc_ast_delete(r.output);
+        } else {    
+            mpc_err_print(r.error);
+            mpc_err_delete(r.error);
+        }
     
-    mpc_result_t r;
-    if (mpc_parse("<stdin>", input, Lispy, &r)) {
-      
-      lval* x = lval_eval(e, lval_read(r.output));
-      lval_println(x);
-      lval_del(x);
-      
-      mpc_ast_delete(r.output);
-    } else {    
-      mpc_err_print(r.error);
-      mpc_err_delete(r.error);
+        free(input);
     }
-    
-    free(input);
-    
   }
-  
+  if (argc >=2){
+    for (int i=0;i< argc;i++){
+        lval* args = lval_add(lval_sexpr(), lval_str(argv[i]));
+        lval* x = builtin_load(e, args);
+
+        if(x->type == LVAL_ERR){
+            lval_println(x);
+        }
+        lval_del(x);
+    }
+  }
+
   lenv_del(e);
   
   mpc_cleanup(8, Number, Symbol, String, Comment, Sexpr, Qexpr, Expr, Lispy);
